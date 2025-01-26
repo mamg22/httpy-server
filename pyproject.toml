@@ -1,0 +1,7 @@
+[project]
+name = "httpy-server"
+version = "0.1.0"
+description = "HTTP server based on asyncio"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []
