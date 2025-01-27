@@ -4,10 +4,11 @@ from dataclasses import dataclass
 import pathlib
 import re
 import socket
-from typing import Protocol, Self
+from typing import Protocol, Self, runtime_checkable
 from urllib import parse as uparse
 
 
+@runtime_checkable
 class SupportsLower(Protocol):
     def lower(self) -> Self: ...
 
@@ -32,6 +33,14 @@ class CaseInsensitiveDict[K: SupportsLower, V](MutableMapping):
 
     def __len__(self) -> int:
         return len(self.data)
+
+    def __contains__(self, key: object, /) -> bool:
+        if isinstance(key, SupportsLower):
+            return key.lower() in self.data
+        else:
+            raise KeyError(
+                f"Object of type {type(key)} doesn't support .lower(), cannot be used as index"
+            )
 
     def __repr__(self) -> str:
         name = type(self).__name__
@@ -96,6 +105,9 @@ async def parse_request(reader: asyncio.StreamReader):
         headers[field.lstrip()] = value.strip()
 
     reader.feed_eof()
+
+    if version == (1, 1) and b"Host" not in headers:
+        raise ValueError("Did not receive required Host header on HTTP/1.1")
 
     try:
         length = headers["Content-Length"]
