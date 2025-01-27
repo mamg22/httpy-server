@@ -84,8 +84,11 @@ async def parse_request(reader: asyncio.StreamReader):
         if line.isspace():
             break
 
-        field, value = map(bytes.strip, line.split(b":", 1))
-        headers[field] = value
+        field, value = line.split(b":", 1)
+        if field.rstrip() != field:
+            raise ValueError(f"Field name {repr(field)} contains trailing whitespace")
+
+        headers[field.lstrip()] = value.strip()
 
     reader.feed_eof()
 
