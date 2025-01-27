@@ -5,6 +5,7 @@ import pathlib
 import re
 import socket
 from typing import Protocol, Self
+from urllib import parse as uparse
 
 
 class SupportsLower(Protocol):
@@ -41,7 +42,7 @@ class CaseInsensitiveDict[K: SupportsLower, V](MutableMapping):
 @dataclass
 class HTTPRequest:
     method: bytes
-    target: bytes
+    target: uparse.SplitResultBytes
     version: tuple[int, int]
     headers: CaseInsensitiveDict[bytes, bytes]
     body: bytes
@@ -60,18 +61,22 @@ VALID_METHODS = b"GET HEAD OPTIONS TRACE PUT DELETE POST PATCH CONNECT".split()
 HTTP_VERSION_MATCHER = re.compile(rb"HTTP\/(\d)\.(\d)")
 
 
-def parse_request_line(request_line: bytes) -> tuple[bytes, bytes, tuple[int, int]]:
+def parse_request_line(
+    request_line: bytes,
+) -> tuple[bytes, uparse.SplitResultBytes, tuple[int, int]]:
     method, target, version = map(bytes.strip, request_line.split(b" ", 2))
 
     if method not in VALID_METHODS:
         raise ValueError(f"Unknown request method '{method}'")
+
+    parsed_target = uparse.urlsplit(target)
 
     if matches := HTTP_VERSION_MATCHER.fullmatch(version):
         major, minor = map(int, matches.groups())
     else:
         raise ValueError(f"Could not parse HTTP version '{version}'")
 
-    return method, target, (major, minor)
+    return method, parsed_target, (major, minor)
 
 
 async def parse_request(reader: asyncio.StreamReader):
@@ -113,7 +118,8 @@ async def connection_handler(
     request = await parse_request(reader)
 
     if request.method in [b"GET", b"HEAD"]:
-        path = pathlib.Path(request.target.removeprefix(b"/").decode()).resolve()
+        target_path = request.target.path
+        path = pathlib.Path(target_path.removeprefix(b"/").decode()).resolve()
 
         try:
             if path.is_relative_to(pathlib.Path.cwd()):
@@ -121,7 +127,9 @@ async def connection_handler(
                     file = open(path)
                     content = file.read()
                 else:
-                    dir_info = f"Listing contents of path {request.target.decode()}"
+                    dir_info = (
+                        f"Listing contents of path {request.target.path.decode()}"
+                    )
                     files = (file.name for file in path.iterdir())
 
                     content = f"{dir_info}\n\n{"\n".join(files)}"
