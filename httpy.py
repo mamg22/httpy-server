@@ -74,7 +74,7 @@ def parse_request_line(
     if matches := HTTP_VERSION_MATCHER.fullmatch(version):
         major, minor = map(int, matches.groups())
     else:
-        raise ValueError(f"Could not parse HTTP version {repr(version)}")
+        raise ValueError(f"Could not parse HTTP version {repr(version.decode())}")
 
     return method, parsed_target, (major, minor)
 
@@ -118,11 +118,7 @@ async def parse_request(reader: asyncio.StreamReader):
     return HTTPRequest(method, target, version, headers, body)
 
 
-async def connection_handler(
-    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-) -> None:
-    request = await parse_request(reader)
-
+def handle_request(request: HTTPRequest, writer: asyncio.StreamWriter) -> None:
     if request.method in [b"GET", b"HEAD"]:
         target_path = request.target.path
         path = pathlib.Path(target_path.removeprefix(b"/").decode()).resolve()
@@ -154,6 +150,17 @@ async def connection_handler(
             writer.write(b"HTTP/1.0 404 Not Found\r\n")
     else:
         writer.write(b"HTTP/1.0 501 Not Implemented\r\n")
+
+
+async def connection_handler(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
+    try:
+        request = await parse_request(reader)
+    except ValueError as err:
+        writer.write(b"HTTP/1.0 400 Bad Request\r\n\r\n" + str(err).encode() + b"\r\n")
+    else:
+        handle_request(request, writer)
 
     await writer.drain()
     writer.close()
