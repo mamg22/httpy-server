@@ -105,6 +105,8 @@ async def parse_request(reader: asyncio.StreamReader):
     except ValueError as e:
         raise ValueError("Invalid Content-Length value") from e
     except KeyError:
+        if method == b"POST":
+            raise ValueError("Content-Length required in POST requests")
         body = b""
         while True:
             chunk = await reader.read(1024)
