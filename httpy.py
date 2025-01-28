@@ -67,7 +67,7 @@ def fix_bare_cr[Str: (str, bytes)](text: Str) -> Str:
 
 
 VALID_METHODS = b"GET HEAD OPTIONS TRACE PUT DELETE POST PATCH CONNECT".split()
-HTTP_VERSION_MATCHER = re.compile(rb"HTTP\/(\d)\.(\d)")
+HTTP_VERSION_MATCHER = re.compile(rb"HTTP\/(\d)*\.(\d)*")
 
 
 def parse_request_line(
