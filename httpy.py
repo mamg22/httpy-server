@@ -66,7 +66,7 @@ def parse_request_line(
 ) -> tuple[bytes, uparse.SplitResultBytes, tuple[int, int]]:
     method, target, version = map(bytes.strip, request_line.split(maxsplit=2))
 
-    if method.upper() not in VALID_METHODS:
+    if method not in VALID_METHODS:
         raise ValueError(f"Unknown request method '{method}'")
 
     parsed_target = uparse.urlsplit(target)
