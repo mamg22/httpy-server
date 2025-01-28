@@ -57,25 +57,16 @@ class HTTPRequest:
     body: bytes
 
 
-def fix_bare_cr[Str: (str, bytes)](text: Str) -> Str:
-    bare_finder = r"\r[^\n]"
-    match text:
-        case str():
-            return re.sub(bare_finder, " ", text)
-        case bytes():
-            return re.sub(bare_finder.encode("ASCII"), b" ", text)
-
-
-VALID_METHODS = b"GET HEAD OPTIONS TRACE PUT DELETE POST PATCH CONNECT".split()
-HTTP_VERSION_MATCHER = re.compile(rb"HTTP\/(\d)*\.(\d)*")
+VALID_METHODS = b"GET HEAD POST".split()
+HTTP_VERSION_MATCHER = re.compile(rb"HTTP\/(\d)+\.(\d)+")
 
 
 def parse_request_line(
     request_line: bytes,
 ) -> tuple[bytes, uparse.SplitResultBytes, tuple[int, int]]:
-    method, target, version = map(bytes.strip, request_line.split(b" ", 2))
+    method, target, version = map(bytes.strip, request_line.split(maxsplit=2))
 
-    if method not in VALID_METHODS:
+    if method.upper() not in VALID_METHODS:
         raise ValueError(f"Unknown request method '{method}'")
 
     parsed_target = uparse.urlsplit(target)
@@ -83,31 +74,25 @@ def parse_request_line(
     if matches := HTTP_VERSION_MATCHER.fullmatch(version):
         major, minor = map(int, matches.groups())
     else:
-        raise ValueError(f"Could not parse HTTP version '{version}'")
+        raise ValueError(f"Could not parse HTTP version {repr(version)}")
 
     return method, parsed_target, (major, minor)
 
 
 async def parse_request(reader: asyncio.StreamReader):
-    request_line = fix_bare_cr(await reader.readline()).rstrip(b"\r\n")
+    request_line = (await reader.readline()).rstrip(b"\r\n")
 
     method, target, version = parse_request_line(request_line)
 
     headers = CaseInsensitiveDict()
-    while line := fix_bare_cr(await reader.readline()):
-        if line.isspace():
+    while line := (await reader.readline()).rstrip():
+        if not line:
             break
 
-        field, value = line.split(b":", 1)
-        if field.rstrip() != field:
-            raise ValueError(f"Field name {repr(field)} contains trailing whitespace")
-
-        headers[field.lstrip()] = value.strip()
+        field, value = map(bytes.strip, line.split(b":", 1))
+        headers[field] = value
 
     reader.feed_eof()
-
-    if version == (1, 1) and b"Host" not in headers:
-        raise ValueError("Did not receive required Host header on HTTP/1.1")
 
     try:
         length = headers["Content-Length"]
@@ -149,17 +134,17 @@ async def connection_handler(
                 length = len(content)
 
                 writer.write(
-                    f"HTTP/1.1 200 OK\r\nContent-Length: {length}\r\n\r\n".encode()
+                    f"HTTP/1.0 200 OK\r\nContent-Length: {length}\r\n\r\n".encode()
                 )
 
                 if request.method == b"GET":
                     writer.write(content.encode())
             else:
-                writer.write(b"HTTP/1.1 403 Forbidden\r\n")
+                writer.write(b"HTTP/1.0 403 Forbidden\r\n")
         except FileNotFoundError:
-            writer.write(b"HTTP/1.1 404 Not Found\r\n")
+            writer.write(b"HTTP/1.0 404 Not Found\r\n")
     else:
-        writer.write(b"HTTP/1.1 501 Not Implemented\r\n")
+        writer.write(b"HTTP/1.0 501 Not Implemented\r\n")
 
     await writer.drain()
     writer.close()
