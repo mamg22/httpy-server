@@ -130,7 +130,7 @@ async def connection_handler(
         try:
             if path.is_relative_to(pathlib.Path.cwd()):
                 if path.is_file():
-                    file = open(path)
+                    file = open(path, "rb")
                     content = file.read()
                 else:
                     dir_info = (
@@ -138,7 +138,7 @@ async def connection_handler(
                     )
                     files = (file.name for file in path.iterdir())
 
-                    content = f"{dir_info}\n\n{"\n".join(files)}"
+                    content = f"{dir_info}\n\n{"\n".join(files)}".encode()
 
                 length = len(content)
 
@@ -147,7 +147,7 @@ async def connection_handler(
                 )
 
                 if request.method == b"GET":
-                    writer.write(content.encode())
+                    writer.write(content)
             else:
                 writer.write(b"HTTP/1.0 403 Forbidden\r\n")
         except FileNotFoundError:
