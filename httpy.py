@@ -84,7 +84,7 @@ async def parse_request(reader: asyncio.StreamReader):
 
     method, target, version = parse_request_line(request_line)
 
-    headers = CaseInsensitiveDict()
+    headers = CaseInsensitiveDict[bytes, bytes]()
     while line := (await reader.readline()).rstrip():
         if not line:
             break
@@ -95,8 +95,15 @@ async def parse_request(reader: asyncio.StreamReader):
     reader.feed_eof()
 
     try:
-        length = headers["Content-Length"]
-        body = await reader.read(int(length))
+        length = int(headers[b"Content-Length"])
+        if length < 0:
+            raise ValueError("Content-Length cannot be negative")
+        elif length == 0:
+            body = b""
+        else:
+            body = await reader.read(length)
+    except ValueError as e:
+        raise ValueError("Invalid Content-Length value") from e
     except KeyError:
         body = b""
         while True:
