@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import MutableMapping, Iterator
 from dataclasses import dataclass
+import html
 from http import HTTPStatus
 import pathlib
 import re
@@ -155,6 +156,21 @@ async def parse_request(reader: asyncio.StreamReader):
     return HTTPRequest(method, target, version, headers, body)
 
 
+DIR_TEMPLATE = """\
+<!DOCTYPE html>
+<html>
+    <meta charset="utf-8">
+    <title>Directory listing for {path}</title>
+<body>
+    Listing contents of path {path}
+    <ul>
+        {listing}
+    </ul>
+</body>
+</html>
+"""
+
+
 def handle_request(request: HTTPRequest, writer: asyncio.StreamWriter) -> None:
     if request.method in [b"GET", b"HEAD"]:
         target_path = request.target.path
@@ -163,15 +179,20 @@ def handle_request(request: HTTPRequest, writer: asyncio.StreamWriter) -> None:
         try:
             if path.is_relative_to(pathlib.Path.cwd()):
                 if path.is_file():
-                    file = open(path, "rb")
-                    content = file.read()
+                    content = path.read_bytes()
                 else:
-                    dir_info = (
-                        f"Listing contents of path {request.target.path.decode()}"
-                    )
-                    files = (file.name for file in path.iterdir())
+                    listing = """<li><a href="..">..</a></li>"""
+                    for file in path.iterdir():
+                        listing += """<li><a href="{href}">{file}</a></li>""".format(
+                            href=uparse.quote(
+                                str(file.relative_to(pathlib.Path.cwd()))
+                            ),
+                            file=html.escape(file.name),
+                        )
 
-                    content = f"{dir_info}\n\n{"\n".join(files)}".encode()
+                    content = DIR_TEMPLATE.format(
+                        path=request.target.path.decode(), listing=listing
+                    ).encode()
 
                 length = len(content)
 
