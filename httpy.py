@@ -90,12 +90,21 @@ HTTP_VERSION_MATCHER = re.compile(rb"HTTP\/(\d)+\.(\d)+")
 def parse_request_line(
     request_line: bytes,
 ) -> tuple[bytes, uparse.SplitResultBytes, tuple[int, int]]:
-    method, target, version = map(bytes.strip, request_line.split(maxsplit=2))
+    try:
+        method, target, version = map(bytes.strip, request_line.split(maxsplit=2))
+    except ValueError:
+        raise RequestParseError("Invalid request line format")
 
     if method not in VALID_METHODS:
         raise RequestParseError(f"Unknown request method '{method}'")
 
     parsed_target = uparse.urlsplit(target)
+
+    if parsed_target.scheme and parsed_target.netloc:
+        raise RequestParseError("Absolute URIs not supported", 501)
+
+    if not parsed_target.path.strip() or not parsed_target.path.startswith(b"/"):
+        raise RequestParseError("Invalid request URI")
 
     if matches := HTTP_VERSION_MATCHER.fullmatch(version):
         major, minor = map(int, matches.groups())
