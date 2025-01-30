@@ -1,9 +1,11 @@
 import asyncio
 from collections.abc import MutableMapping, Iterator
 from dataclasses import dataclass
+from http import HTTPStatus
 import pathlib
 import re
 import socket
+from textwrap import dedent
 from typing import Protocol, Self, runtime_checkable
 from urllib import parse as uparse
 
@@ -57,6 +59,30 @@ class HTTPRequest:
     body: bytes
 
 
+class HTTPError(Exception): ...
+
+
+class RequestParseError(HTTPError):
+    message: str
+    code: int
+
+    def __init__(self, message: str, code: int = 400) -> None:
+        self.message = message
+        self.code = code
+
+    def as_response(self) -> bytes:
+        phrase = HTTPStatus(self.code).phrase
+        body = self.message.encode()
+
+        return (
+            dedent(f"""\
+        HTTP/1.0 {self.code} {phrase}\r\n\
+        Content-Length: {len(body)}\r\n\
+        \r\n""").encode()
+            + body
+        )
+
+
 VALID_METHODS = b"GET HEAD POST".split()
 HTTP_VERSION_MATCHER = re.compile(rb"HTTP\/(\d)+\.(\d)+")
 
@@ -67,14 +93,16 @@ def parse_request_line(
     method, target, version = map(bytes.strip, request_line.split(maxsplit=2))
 
     if method not in VALID_METHODS:
-        raise ValueError(f"Unknown request method '{method}'")
+        raise RequestParseError(f"Unknown request method '{method}'")
 
     parsed_target = uparse.urlsplit(target)
 
     if matches := HTTP_VERSION_MATCHER.fullmatch(version):
         major, minor = map(int, matches.groups())
     else:
-        raise ValueError(f"Could not parse HTTP version {repr(version.decode())}")
+        raise RequestParseError(
+            f"Could not parse HTTP version {repr(version.decode())}"
+        )
 
     return method, parsed_target, (major, minor)
 
@@ -97,16 +125,16 @@ async def parse_request(reader: asyncio.StreamReader):
     try:
         length = int(headers[b"Content-Length"])
         if length < 0:
-            raise ValueError("Content-Length cannot be negative")
+            raise RequestParseError("Content-Length cannot be negative")
         elif length == 0:
             body = b""
         else:
             body = await reader.read(length)
     except ValueError as e:
-        raise ValueError("Invalid Content-Length value") from e
+        raise RequestParseError("Invalid Content-Length value") from e
     except KeyError:
         if method == b"POST":
-            raise ValueError("Content-Length required in POST requests")
+            raise RequestParseError("Content-Length required in POST requests")
         body = b""
         while True:
             chunk = await reader.read(1024)
@@ -157,8 +185,8 @@ async def connection_handler(
 ) -> None:
     try:
         request = await parse_request(reader)
-    except ValueError as err:
-        writer.write(b"HTTP/1.0 400 Bad Request\r\n\r\n" + str(err).encode() + b"\r\n")
+    except RequestParseError as err:
+        writer.write(err.as_response())
     else:
         handle_request(request, writer)
 
