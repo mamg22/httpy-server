@@ -60,6 +60,29 @@ class HTTPRequest:
     body: bytes
 
 
+def make_response(
+    code: int,
+    body: bytes | None = None,
+    headers: dict[bytes, bytes] | None = None,
+) -> bytes:
+    if headers is None:
+        headers = {}
+
+    phrase = HTTPStatus(code).phrase
+    status_line = f"HTTP/1.0 {code} {phrase}\r\n".encode()
+
+    headers[b"Server"] = b"httpy/0.1"
+    if body is not None:
+        headers[b"Content-Length"] = str(len(body)).encode()
+
+    header_lines = (b"%b: %b" % (field, value) for field, value in headers.items())
+    header_section = b"\r\n".join(header_lines)
+
+    response = status_line + header_section + b"\r\n\r\n" + (body or b"")
+
+    return response
+
+
 class HTTPError(Exception): ...
 
 
@@ -72,16 +95,9 @@ class RequestParseError(HTTPError):
         self.code = code
 
     def as_response(self) -> bytes:
-        phrase = HTTPStatus(self.code).phrase
         body = self.message.encode()
 
-        return (
-            dedent(f"""\
-        HTTP/1.0 {self.code} {phrase}\r\n\
-        Content-Length: {len(body)}\r\n\
-        \r\n""").encode()
-            + body
-        )
+        return make_response(self.code, body)
 
 
 VALID_METHODS = b"GET HEAD POST".split()
@@ -194,20 +210,20 @@ def handle_request(request: HTTPRequest, writer: asyncio.StreamWriter) -> None:
                         path=request.target.path.decode(), listing=listing
                     ).encode()
 
-                length = len(content)
-
-                writer.write(
-                    f"HTTP/1.0 200 OK\r\nContent-Length: {length}\r\n\r\n".encode()
-                )
-
                 if request.method == b"GET":
-                    writer.write(content)
+                    response = make_response(200, content)
+                else:
+                    response = make_response(
+                        200, None, {b"Content-Length": str(len(content)).encode()}
+                    )
+
+                writer.write(response)
             else:
-                writer.write(b"HTTP/1.0 403 Forbidden\r\n")
+                writer.write(make_response(403))
         except FileNotFoundError:
-            writer.write(b"HTTP/1.0 404 Not Found\r\n")
+            writer.write(make_response(404))
     else:
-        writer.write(b"HTTP/1.0 501 Not Implemented\r\n")
+        writer.write(make_response(501))
 
 
 async def connection_handler(
