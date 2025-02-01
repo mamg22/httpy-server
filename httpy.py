@@ -1,12 +1,13 @@
 import asyncio
 from collections.abc import MutableMapping, Iterator
 from dataclasses import dataclass
+from datetime import datetime
 import html
 from http import HTTPStatus
+import sys
 import pathlib
 import re
 import socket
-from textwrap import dedent
 from typing import Protocol, Self, runtime_checkable
 from urllib import parse as uparse
 
@@ -81,6 +82,18 @@ def make_response(
     response = status_line + header_section + b"\r\n\r\n" + (body or b"")
 
     return response
+
+
+LOG_FORMAT = '{ip} - - [{datetime}] "{line}" {code} {size}'
+
+
+def log_response(
+    ip: str, receive_time: datetime, request_line: bytes, code: int, size: int
+) -> None:
+    dt = receive_time.strftime("%d/%b/%Y:%H:%M:%S %z")
+    line = request_line.decode()
+    msg = LOG_FORMAT.format(ip=ip, datetime=dt, line=line, code=code, size=size)
+    print(msg, file=sys.stderr)
 
 
 class HTTPError(Exception): ...
@@ -188,6 +201,8 @@ DIR_TEMPLATE = """\
 
 
 def handle_request(request: HTTPRequest, writer: asyncio.StreamWriter) -> None:
+    received = datetime.now()
+
     if request.method in [b"GET", b"HEAD"]:
         target_path = request.target.path
         path = pathlib.Path(target_path.removeprefix(b"/").decode()).resolve()
@@ -216,14 +231,27 @@ def handle_request(request: HTTPRequest, writer: asyncio.StreamWriter) -> None:
                     response = make_response(
                         200, None, {b"Content-Length": str(len(content)).encode()}
                     )
-
-                writer.write(response)
             else:
-                writer.write(make_response(403))
+                response = make_response(403)
         except FileNotFoundError:
-            writer.write(make_response(404))
+            response = make_response(404)
     else:
-        writer.write(make_response(501))
+        response = make_response(501)
+
+    line = b"%b %b HTTP/%i.%i" % (
+        request.method,
+        request.target.path + request.target.query + request.target.fragment,
+        *request.version,
+    )
+    log_response(
+        "{}:{}".format(*writer.get_extra_info("peername")),
+        received,
+        line,
+        int(response.splitlines()[0].split()[1]),
+        len(response),
+    )
+
+    writer.write(response)
 
 
 async def connection_handler(
